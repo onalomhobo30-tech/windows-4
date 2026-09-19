@@ -1,58 +1,42 @@
-# HUSKAGENT WINDOWS 4 — Phase 5 system-image deployment layer
+# Safe Phase 5 validation
 
-Phase 5 adds the real deployment layer for an operator-supplied Windows image. It uses WinPE and DISM directly and never bundles Microsoft Windows binaries, licenses, product keys, or installation media. This repository carries the deployment tooling only; the actual image remains external and operator-provided.
+Phase 5 now includes a non-destructive validation path. It uses the real WinPE host, real WIM/ESD metadata, real firmware detection, real target-disk information, and real availability of DISM/BCDBoot/Bootsect. It does not call `Clear-Disk`, `Initialize-Disk`, `New-Partition`, `Format-Volume`, image application, BCD writes, or rollback cleanup.
 
-## Supported deployment scenarios
+## Run the safe plan
 
-- Image discovery from `X:\Sources`, `X:\Images`, `X:\Huskagent\Images`, and common removable drive paths.
-- WIM/ESD discovery and image-index inspection through `Get-WindowsImage`.
-- Edition and architecture validation before deployment.
-- Target-disk validation before destructive operations.
-- UEFI/GPT and Legacy BIOS/MBR partition creation.
-- Image application with `dism.exe /Apply-Image`.
-- Boot configuration with `bcdboot.exe` and `bootsect.exe`.
-- Deployment logging to `X:\Huskagent-Phase5.log`.
-- Rollback cleanup on failure.
-- Post-install verification of the OS, boot files, and deployment marker.
-
-## Example usage
-
-Review available image catalog entries:
+Boot the Phase 5 WinPE media, attach an operator-supplied image, then run:
 
 ```powershell
-.\installer\winpe\Deploy-SystemImage-Phase5.ps1 -ListImages -OutputPath X:\Huskagent-Phase5-Images.json
-```
-
-Review available target disks:
-
-```powershell
-.\installer\winpe\Deploy-SystemImage-Phase5.ps1 -ListTargets -OutputPath X:\Huskagent-Phase5-Targets.json
-```
-
-Deploy a selected image to disk 1:
-
-```powershell
-.\installer\winpe\Deploy-SystemImage-Phase5.ps1 `
+.\Run-Phase5.ps1 `
+  -PlanOnly `
   -ImagePath X:\Huskagent\Images\install.wim `
   -ImageIndex 1 `
-  -Firmware UEFI `
-  -Architecture x64 `
+  -Firmware Auto `
+  -Architecture Auto `
   -DiskNumber 1 `
-  -Confirmed `
-  -Deploy
+  -OutputPath X:\Huskagent-Phase5-plan.json
 ```
 
-For Legacy BIOS:
+The command validates:
 
-```powershell
-.\installer\winpe\Deploy-SystemImage-Phase5.ps1 `
-  -ImagePath X:\Huskagent\Images\install.wim `
-  -ImageIndex 1 `
-  -Firmware BIOS `
-  -Architecture x64 `
-  -DiskNumber 2 `
-  -Confirmed `
-  -Deploy
-```
+- WIM/ESD extension and file existence
+- real image indexes, edition metadata, and architecture
+- real BIOS/UEFI mode
+- real x86/x64 host compatibility
+- real target disk existence, capacity, bus type, read-only state, boot/system flags, and current partitions
+- planned UEFI/GPT or BIOS/MBR partition mapping
+- availability of DISM, BCDBoot, and Bootsect
+- safe rollback boundary and verification status
 
-This phase preserves the earlier Phase 1–4 installer media and adds the actual system-image deployment layer. It does not change Windows licensing, bypass activation, or include a licensed installation image in the repository.
+It writes a JSON plan and `X:\Huskagent-Phase5-safe-test.log`. The output explicitly reports that image application, partition mutation, bootloader writes, rollback cleanup, and post-install verification were not executed.
+
+## Testing guarantees
+
+- No disk is erased.
+- No partition is created, formatted, or removed.
+- No image is applied.
+- No BCD store is changed.
+- No rollback cleanup is invoked.
+- No mock hardware, image metadata, or disk data is used.
+
+The existing deployment path remains available through `Deploy-SystemImage-Phase5.ps1 -Deploy`; it still requires the existing explicit `DEPLOY DISK <number>` confirmation. Phase 1–4 files and behavior are preserved.
