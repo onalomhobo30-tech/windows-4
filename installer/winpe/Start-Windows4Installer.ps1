@@ -1,58 +1,35 @@
+[CmdletBinding()]
+param(
+  [ValidateSet('Ui','Prepare','Inspect')][string] $Action = 'Ui',
+  [int] $DiskNumber = -1
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$log = 'X:\Windows4-Phase1.log'
-Start-Transcript -Path $log -Append | Out-Null
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$inventory = Join-Path $env:SystemDrive 'Huskagent-Hardware.json'
 
-function Show-Header {
-  Clear-Host
-  Write-Host 'HUSKAGENT WINDOWS 4 — PHASE 1 INSTALLER' -ForegroundColor Cyan
-  Write-Host 'WinPE foundation for desktop PCs and laptops' -ForegroundColor DarkCyan
-  Write-Host "Log: $log`n"
-}
-
-function Get-HardwareSummary {
-  Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer, Model, TotalPhysicalMemory
-  Get-CimInstance Win32_BIOS | Select-Object SerialNumber, SMBIOSBIOSVersion
-  Get-CimInstance Win32_Processor | Select-Object Name, NumberOfLogicalProcessors
-}
-
-function Show-Disks {
-  Get-Disk | Select-Object Number, FriendlyName, BusType, PartitionStyle, @{Name='SizeGB';Expression={[math]::Round($_.Size / 1GB, 1)}, IsBoot, IsSystem | Format-Table -AutoSize
-}
-
-function Invoke-PrepareDisk {
-  $raw = Read-Host 'Enter the target disk number (or blank to cancel)'
-  if ($raw -notmatch '^\d+$') { Write-Warning 'Cancelled.'; return }
-  $number = [int]$raw
-  $disk = Get-Disk -Number $number -ErrorAction Stop
-  Show-Disks
-  $confirmation = Read-Host "Type PREPARE DISK $number to erase disk $number ($($disk.FriendlyName), $([math]::Round($disk.Size / 1GB, 1)) GB)"
-  if ($confirmation -cne "PREPARE DISK $number") { Write-Warning 'Confirmation did not match; no changes made.'; return }
-  Write-Warning 'Phase 1 preparation will erase partitions on the selected disk.'
-  Clear-Disk -Number $number -RemoveData -Confirm:$false
-  Initialize-Disk -Number $number -PartitionStyle GPT
-  $efi = New-Partition -DiskNumber $number -Size 260MB -GptType '{C12A7328-F81F-11D2-BA4B-00A0C93EC93B}'
+function Start-Inventory { & (Join-Path $scriptRoot 'Get-HardwareInventory.ps1') -OutputPath $inventory | Out-Null }
+function Prepare-Disk([int] $Number) {
+  if ($Number -lt 0) { throw 'A target disk number is required.' }
+  $disk = Get-Disk -Number $Number -ErrorAction Stop
+  $confirmation = Read-Host "Type PREPARE DISK $Number to erase disk $Number ($($disk.FriendlyName))"
+  if ($confirmation -cne "PREPARE DISK $Number") { Write-Warning 'Confirmation did not match; no changes made.'; return }
+  Clear-Disk -Number $Number -RemoveData -Confirm:$false
+  Initialize-Disk -Number $Number -PartitionStyle GPT
+  $efi = New-Partition -DiskNumber $Number -Size 260MB -GptType '{C12A7328-F81F-11D2-BA4B-00A0C93EC93B}'
   Format-Volume -Partition $efi -FileSystem FAT32 -NewFileSystemLabel 'SYSTEM' -Confirm:$false | Out-Null
-  $os = New-Partition -DiskNumber $number -UseMaximumSize -AssignDriveLetter
+  $os = New-Partition -DiskNumber $Number -UseMaximumSize -AssignDriveLetter
   Format-Volume -Partition $os -FileSystem NTFS -NewFileSystemLabel 'HUSKAGENT' -Confirm:$false | Out-Null
-  Write-Host "Disk $number prepared as GPT/UEFI staging media. No operating system was installed." -ForegroundColor Green
+  Write-Host "Disk $Number prepared as GPT/UEFI staging media. No operating system was installed." -ForegroundColor Green
 }
 
-try {
-  Show-Header
-  Get-HardwareSummary | Format-List
-  Show-Disks
-  Write-Host "`nCommands: [I] inspect again  [P] prepare a target disk  [E] exit"
-  while ($true) {
-    $choice = (Read-Host 'Choose an action').ToUpperInvariant()
-    switch ($choice) {
-      'I' { Show-Disks }
-      'P' { Invoke-PrepareDisk }
-      'E' { break }
-      default { Write-Warning 'Choose I, P, or E.' }
-    }
-    if ($choice -eq 'E') { break }
+Start-Inventory
+switch ($Action) {
+  'Inspect' { & (Join-Path $scriptRoot 'Get-HardwareInventory.ps1') -OutputMode Display }
+  'Prepare' { Prepare-Disk $DiskNumber; Start-Inventory }
+  default {
+    $hta = Join-Path $scriptRoot 'HuskagentInstaller.hta'
+    if (Get-Command mshta.exe -ErrorAction SilentlyContinue) { Start-Process mshta.exe -ArgumentList $hta -Wait }
+    else { Write-Warning 'mshta.exe is unavailable; falling back to the Phase 1 console.'; & (Join-Path $scriptRoot 'Start-Windows4Installer.ps1') -Action Console }
   }
-} finally {
-  Stop-Transcript | Out-Null
 }
