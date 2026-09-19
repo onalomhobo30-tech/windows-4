@@ -1,11 +1,23 @@
 # Safe Phase 5 validation
 
-Phase 5 includes a non-destructive dry-run path for validating the deployment layer on real WinPE hardware. It reads real WIM/ESD metadata and real disk information but does not mutate storage.
+The safe dry-run path has been corrected and can be checked without a WIM/ESD image or physical disk mutation.
 
-## Dry-run command
+## Static validation
+
+From a PowerShell session in the repository root:
 
 ```powershell
-.\Run-Phase5.ps1 `
+.\installer\winpe\Test-Phase5Scripts.ps1
+```
+
+This parses the Phase 5 scripts with PowerShell's parser and checks that the safe validation script contains no disk-mutating or deployment-execution commands.
+
+## Live WinPE dry-run
+
+On WinPE, with an operator-supplied image and a real target disk selected for inspection:
+
+```powershell
+X:\Run-Phase5.ps1 `
   -PlanOnly `
   -ImagePath X:\Huskagent\Images\install.wim `
   -ImageIndex 1 `
@@ -15,25 +27,6 @@ Phase 5 includes a non-destructive dry-run path for validating the deployment la
   -OutputPath X:\Huskagent-Phase5-plan.json
 ```
 
-The dry-run validates:
+The live dry-run reads real WIM/ESD metadata, firmware, architecture, disk, and partition information. It records the planned DISM and BCD commands and post-install checks but does not execute them.
 
-- PowerShell parameters and execution flow
-- `.wim`/`.esd` existence and extension
-- real image indexes, names, editions, and architecture metadata
-- real BIOS/UEFI firmware detection
-- real x86/x64 host architecture detection
-- real target-disk existence, capacity, bus type, read-only state, boot/system flags, and partitions
-- planned UEFI/GPT or Legacy BIOS/MBR partition mapping
-- availability of `dism.exe`, `bcdboot.exe`, and `bootsect.exe`
-- generated DISM image-application command
-- generated UEFI and BIOS boot-configuration commands
-- planned post-install verification paths
-- logging and failure-result output
-
-The resulting JSON contains `PartitionMapping`, `Commands`, `Tools`, `VerificationPlan`, and a `Checks` object. Commands are recorded only; they are never invoked by the dry-run.
-
-## Safety guarantee
-
-`-PlanOnly` never calls `Clear-Disk`, `Initialize-Disk`, `New-Partition`, `Remove-Partition`, `Format-Volume`, `Expand-WindowsImage`, `dism /Apply-Image`, `bcdboot`, `bootsect`, or rollback cleanup. No physical disk is erased, formatted, partitioned, or otherwise modified.
-
-The regular deployment path remains available through `Deploy-SystemImage-Phase5.ps1 -Deploy` and retains explicit `DEPLOY DISK <number>` confirmation. Microsoft binaries, licenses, product keys, and installation images are not included.
+No `Clear-Disk`, `Initialize-Disk`, `New-Partition`, `Remove-Partition`, `Format-Volume`, image application, `bcdboot`, `bootsect`, or rollback operation is performed by `-PlanOnly`.

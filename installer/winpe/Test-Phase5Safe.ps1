@@ -69,21 +69,23 @@ function New-Plan([object] $Image, [object] $Disk, [object] $Tools) {
   if ($targetArch -eq 'Unknown') { $targetArch = Arch $env:PROCESSOR_ARCHITECTURE }
   if ($Image.Architecture -eq 'ARM64') { throw 'ARM64 images are unsupported.' }
   if ($targetArch -eq 'x86' -and $Image.Architecture -eq 'x64') { throw 'An x64 image cannot target x86.' }
-  $osRoot = '<OS>:\\'
+  $osRoot = '<OS>:\'
   $systemRoot = if ($mode -eq 'UEFI') { '<EFI>:' } else { '<SYSTEM>:' }
+  $osWindows = "$osRoot`Windows"
+  $systemBoot = "$systemRoot`bootmgr"
   $mapping = if ($mode -eq 'UEFI') {
-    [pscustomobject]@{ DiskStyle='GPT'; System='260 MB FAT32 EFI System Partition'; Reserved='16 MB GPT MSR'; OS='Remaining NTFS partition'; BootCommand="bcdboot $osRoot`Windows /s $systemRoot /f UEFI" }
+    [pscustomobject]@{ DiskStyle='GPT'; System='260 MB FAT32 EFI System Partition'; Reserved='16 MB GPT MSR'; OS='Remaining NTFS partition'; BootCommand="bcdboot ${osRoot}Windows /s $systemRoot /f UEFI" }
   } else {
-    [pscustomobject]@{ DiskStyle='MBR'; System='350 MB NTFS active System partition'; Reserved='None'; OS='Remaining NTFS partition'; BootCommand="bootsect /nt60 $systemRoot /mbr; bcdboot $osRoot`Windows /s $systemRoot /f BIOS" }
+    [pscustomobject]@{ DiskStyle='MBR'; System='350 MB NTFS active System partition'; Reserved='None'; OS='Remaining NTFS partition'; BootCommand="bootsect /nt60 $systemRoot /mbr; bcdboot ${osRoot}Windows /s $systemRoot /f BIOS" }
   }
   $commands = [ordered]@{
     ApplyImage = "dism.exe /Apply-Image /ImageFile:`"$($Image.Path)`" /Index:$($Image.Index) /ApplyDir:`"$osRoot`" /Quiet"
     BootConfiguration = $mapping.BootCommand
   }
   $verification = @(
-    [pscustomobject]@{ Name='Windows directory'; Path="$osRoot`Windows"; Expected='Exists' },
-    [pscustomobject]@{ Name='System32'; Path="$osRoot`Windows\\System32"; Expected='Exists' },
-    [pscustomobject]@{ Name='Boot files'; Path="$systemRoot`bootmgr or EFI\\Microsoft\\Boot\\bootmgfw.efi"; Expected='Exists' },
+    [pscustomobject]@{ Name='Windows directory'; Path=$osWindows; Expected='Exists' },
+    [pscustomobject]@{ Name='System32'; Path="$osWindows\System32"; Expected='Exists' },
+    [pscustomobject]@{ Name='Boot files'; Path="$systemBoot or $systemRoot`EFI\Microsoft\Boot\bootmgfw.efi"; Expected='Exists' },
     [pscustomobject]@{ Name='Deployment marker'; Path="$osRoot`HuskagentWindows4-Phase5.json"; Expected='Exists' }
   )
   [pscustomobject]@{
